@@ -616,43 +616,57 @@ app.put('/api/equipment/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const { equipment, username } = req.body;
-        // FIX: Create a shallow copy of the equipment object and delete the 'id' property.
-        // Passing the ID in the SET clause of an UPDATE statement is invalid SQL and causes a database error.
-        const dataToUpdate = { ...equipment };
-        delete dataToUpdate.id;
-
+        
         const [oldEquipmentRows] = await db.promise().query('SELECT * FROM equipment WHERE id = ?', [id]);
         if (oldEquipmentRows.length === 0) {
             return res.status(404).json({ message: "Equipment not found" });
         }
         const oldEquipment = oldEquipmentRows[0];
+        
+        const allowedFields = [
+            'equipamento', 'garantia', 'patrimonio', 'serial', 'usuarioAtual', 'usuarioAnterior',
+            'local', 'setor', 'dataEntregaUsuario', 'status', 'dataDevolucao', 'tipo',
+            'notaCompra', 'notaPlKm', 'termoResponsabilidade', 'foto', 'brand', 'model',
+            'observacoes', 'emailColaborador', 'identificador', 'nomeSO', 'memoriaFisicaTotal',
+            'grupoPoliticas', 'pais', 'cidade', 'estadoProvincia', 'condicaoTermo'
+        ];
 
-        const changes = Object.keys(dataToUpdate).reduce((acc, key) => {
-            const oldValue = oldEquipment[key] instanceof Date ? oldEquipment[key].toISOString().split('T')[0] : oldEquipment[key];
-            const newValue = dataToUpdate[key];
-            if (String(oldValue || '') !== String(newValue || '')) {
-                acc.push({ field: key, oldValue, newValue });
+        const dataToUpdate = {};
+        const changes = [];
+
+        for (const key of allowedFields) {
+            if (Object.prototype.hasOwnProperty.call(equipment, key)) {
+                const oldValue = oldEquipment[key] instanceof Date ? oldEquipment[key].toISOString().split('T')[0] : oldEquipment[key];
+                const newValue = equipment[key];
+                 if (String(oldValue || '') !== String(newValue || '')) {
+                    changes.push({ field: key, oldValue, newValue });
+                    dataToUpdate[key] = newValue;
+                }
             }
-            return acc;
-        }, []);
-
+        }
+        
         if (dataToUpdate.serial && dataToUpdate.serial !== oldEquipment.serial) {
             dataToUpdate.qrCode = JSON.stringify({ id: equipment.id, serial: dataToUpdate.serial, type: 'equipment' });
+            changes.push({ field: 'qrCode', oldValue: oldEquipment.qrCode, newValue: dataToUpdate.qrCode });
         }
-
-        await db.promise().query('UPDATE equipment SET ? WHERE id = ?', [dataToUpdate, id]);
+        
+        if (Object.keys(dataToUpdate).length > 0) {
+            await db.promise().query('UPDATE equipment SET ? WHERE id = ?', [dataToUpdate, id]);
+        }
 
         if (changes.length > 0) {
             await recordHistory(id, username, changes);
-            logAction(username, 'UPDATE', 'EQUIPMENT', id, `Updated equipment: ${dataToUpdate.equipamento}. Changes: ${changes.map(c => c.field).join(', ')}`);
+            logAction(username, 'UPDATE', 'EQUIPMENT', id, `Updated equipment: ${equipment.equipamento}. Changes: ${changes.map(c => c.field).join(', ')}`);
         }
 
-        res.json({ ...dataToUpdate, id: parseInt(id) });
+        const [updatedRow] = await db.promise().query('SELECT * FROM equipment WHERE id = ?', [id]);
+        res.json(updatedRow[0]);
     } catch (err) {
         console.error("Update equipment error:", err);
         res.status(500).json({ message: "Database error" });
     }
 });
+
 
 app.delete('/api/equipment/:id', (req, res) => {
     const { id } = req.params;
@@ -814,20 +828,37 @@ app.put('/api/licenses/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const { license, username } = req.body;
-        // FIX: Create a shallow copy of the license object and delete the 'id' property.
-        // Passing the ID in the SET clause of an UPDATE statement is invalid SQL and causes a database error.
-        const dataToUpdate = { ...license };
-        delete dataToUpdate.id;
+
+        const allowedFields = [
+            'produto', 'tipoLicenca', 'chaveSerial', 'dataExpiracao', 'usuario',
+            'cargo', 'empresa', 'setor', 'gestor', 'centroCusto', 'contaRazao',
+            'nomeComputador', 'numeroChamado', 'observacoes'
+        ];
+
+        const dataToUpdate = {};
+        for (const key in license) {
+            if (Object.prototype.hasOwnProperty.call(license, key) && allowedFields.includes(key)) {
+                dataToUpdate[key] = license[key] === undefined ? null : license[key];
+            }
+        }
+        
+        if (Object.keys(dataToUpdate).length === 0) {
+            const [currentRow] = await db.promise().query('SELECT * FROM licenses WHERE id = ?', [id]);
+            return res.json(currentRow.length > 0 ? currentRow[0] : {});
+        }
 
         await db.promise().query('UPDATE licenses SET ? WHERE id = ?', [dataToUpdate, id]);
         
         logAction(username, 'UPDATE', 'LICENSE', id, `Updated license for product: ${license.produto}`);
-        res.json({ ...license, id: parseInt(id) });
+        const [updatedRow] = await db.promise().query('SELECT * FROM licenses WHERE id = ?', [id]);
+        res.json(updatedRow[0]);
+
     } catch (err) {
         console.error("License update DB error:", err);
         return res.status(500).json({ message: "Database error" });
     }
 });
+
 
 app.delete('/api/licenses/:id', (req, res) => {
     const { id } = req.params;
