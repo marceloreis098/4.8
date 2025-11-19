@@ -810,7 +810,18 @@ app.get('/api/licenses', (req, res) => {
 
 app.post('/api/licenses', async (req, res) => {
     const { license, username } = req.body;
-    const { id, approval_status, rejection_reason, created_by_id, ...newLicenseData } = license;
+    const allowedFields = [
+        'produto', 'tipoLicenca', 'chaveSerial', 'dataExpiracao', 'usuario', 'cargo',
+        'empresa', 'setor', 'gestor', 'centroCusto', 'contaRazao', 'nomeComputador',
+        'numeroChamado', 'observacoes'
+    ];
+    
+    const newLicenseData = {};
+    for (const key of allowedFields) {
+        if (Object.prototype.hasOwnProperty.call(license, key)) {
+            newLicenseData[key] = license[key];
+        }
+    }
 
     try {
         const [userRows] = await db.promise().query('SELECT id, role FROM users WHERE username = ?', [username]);
@@ -1066,11 +1077,12 @@ app.get('/api/audit-log', (req, res) => {
 // --- APPROVALS ---
 app.get('/api/approvals/pending', async (req, res) => {
     try {
-        const [equipment] = await db.promise().query("SELECT id, equipamento as name, 'equipment' as type FROM equipment WHERE approval_status = 'pending_approval'");
-        const [licenses] = await db.promise().query("SELECT id, produto as name, 'license' as type FROM licenses WHERE approval_status = 'pending_approval'");
+        const [equipment] = await db.promise().query("SELECT id, equipamento as name, 'equipment' as `type` FROM equipment WHERE approval_status = 'pending_approval'");
+        const [licenses] = await db.promise().query("SELECT id, produto as name, 'license' as `type` FROM licenses WHERE approval_status = 'pending_approval'");
         res.json([...equipment, ...licenses]);
     } catch (err) {
-        res.status(500).json({ message: "Database error", error: err });
+        console.error("Error fetching pending approvals:", err);
+        res.status(500).json({ message: "Database error", error: err.message });
     }
 });
 
