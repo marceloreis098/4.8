@@ -580,29 +580,32 @@ app.get('/api/equipment/:id/history', (req, res) => {
 
 app.post('/api/equipment', async (req, res) => {
     const { equipment, username } = req.body;
-    const { id, qrCode, ...newEquipment } = equipment;
+    const { id, qrCode, approval_status, rejection_reason, created_by_id, ...newEquipmentData } = equipment;
 
     try {
         const [userRows] = await db.promise().query('SELECT id, role FROM users WHERE username = ?', [username]);
         if (userRows.length === 0) return res.status(404).json({ message: "User not found" });
         const user = userRows[0];
 
-        const [serialCheck] = await db.promise().query('SELECT id FROM equipment WHERE serial = ?', [newEquipment.serial]);
+        const [serialCheck] = await db.promise().query('SELECT id FROM equipment WHERE serial = ?', [newEquipmentData.serial]);
         if (serialCheck.length > 0) {
             return res.status(409).json({ message: "Erro: O número de série já está cadastrado no sistema." });
         }
 
-        newEquipment.created_by_id = user.id;
-        newEquipment.approval_status = user.role === 'Admin' ? 'approved' : 'pending_approval';
+        newEquipmentData.created_by_id = user.id;
+        newEquipmentData.approval_status = user.role === 'Admin' ? 'approved' : 'pending_approval';
+        
+        if (newEquipmentData.dataEntregaUsuario === '') newEquipmentData.dataEntregaUsuario = null;
+        if (newEquipmentData.dataDevolucao === '') newEquipmentData.dataDevolucao = null;
         
         const sql = "INSERT INTO equipment SET ?";
-        const [result] = await db.promise().query(sql, newEquipment);
+        const [result] = await db.promise().query(sql, newEquipmentData);
         
         const insertedId = result.insertId;
-        const qrCodeValue = JSON.stringify({ id: insertedId, serial: newEquipment.serial, type: 'equipment' });
+        const qrCodeValue = JSON.stringify({ id: insertedId, serial: newEquipmentData.serial, type: 'equipment' });
         await db.promise().query('UPDATE equipment SET qrCode = ? WHERE id = ?', [qrCodeValue, insertedId]);
         
-        logAction(username, 'CREATE', 'EQUIPMENT', insertedId, `Created new equipment: ${newEquipment.equipamento}`);
+        logAction(username, 'CREATE', 'EQUIPMENT', insertedId, `Created new equipment: ${newEquipmentData.equipamento}`);
         
         const [insertedRow] = await db.promise().query('SELECT * FROM equipment WHERE id = ?', [insertedId]);
         res.status(201).json(insertedRow[0]);
@@ -644,6 +647,9 @@ app.put('/api/equipment/:id', async (req, res) => {
                 }
             }
         }
+        
+        if (dataToUpdate.dataEntregaUsuario === '') dataToUpdate.dataEntregaUsuario = null;
+        if (dataToUpdate.dataDevolucao === '') dataToUpdate.dataDevolucao = null;
         
         if (dataToUpdate.serial && dataToUpdate.serial !== oldEquipment.serial) {
             dataToUpdate.qrCode = JSON.stringify({ id: equipment.id, serial: dataToUpdate.serial, type: 'equipment' });
@@ -802,20 +808,24 @@ app.get('/api/licenses', (req, res) => {
 
 app.post('/api/licenses', async (req, res) => {
     const { license, username } = req.body;
-    const { id, ...newLicense } = license;
+    const { id, approval_status, rejection_reason, created_by_id, ...newLicenseData } = license;
 
     try {
         const [userRows] = await db.promise().query('SELECT id, role FROM users WHERE username = ?', [username]);
         if (userRows.length === 0) return res.status(404).json({ message: "User not found" });
         const user = userRows[0];
         
-        newLicense.created_by_id = user.id;
-        newLicense.approval_status = user.role === 'Admin' ? 'approved' : 'pending_approval';
+        newLicenseData.created_by_id = user.id;
+        newLicenseData.approval_status = user.role === 'Admin' ? 'approved' : 'pending_approval';
+
+        if (newLicenseData.dataExpiracao === '') {
+            newLicenseData.dataExpiracao = null;
+        }
 
         const sql = "INSERT INTO licenses SET ?";
-        const [result] = await db.promise().query(sql, newLicense);
+        const [result] = await db.promise().query(sql, newLicenseData);
         
-        logAction(username, 'CREATE', 'LICENSE', result.insertId, `Created new license for product: ${newLicense.produto}`);
+        logAction(username, 'CREATE', 'LICENSE', result.insertId, `Created new license for product: ${newLicenseData.produto}`);
         const [insertedRow] = await db.promise().query('SELECT * FROM licenses WHERE id = ?', [result.insertId]);
         res.status(201).json(insertedRow[0]);
     } catch (err) {
@@ -829,26 +839,15 @@ app.put('/api/licenses/:id', async (req, res) => {
         const { id } = req.params;
         const { license, username } = req.body;
 
-        const allowedFields = [
-            'produto', 'tipoLicenca', 'chaveSerial', 'dataExpiracao', 'usuario',
-            'cargo', 'empresa', 'setor', 'gestor', 'centroCusto', 'contaRazao',
-            'nomeComputador', 'numeroChamado', 'observacoes'
-        ];
-
-        const dataToUpdate = {};
-        // Corrected loop: iterate over the safe list of fields
-        for (const key of allowedFields) {
-            // Check if the incoming object has this property defined
-            if (Object.prototype.hasOwnProperty.call(license, key)) {
-                // If it exists, add it to our update object.
-                dataToUpdate[key] = license[key];
-            }
-        }
+        const { id: licenseId, approval_status, rejection_reason, created_by_id, ...dataToUpdate } = license;
         
         if (Object.keys(dataToUpdate).length === 0) {
-            // Nothing to update, just return the current data
             const [currentRow] = await db.promise().query('SELECT * FROM licenses WHERE id = ?', [id]);
             return res.json(currentRow.length > 0 ? currentRow[0] : {});
+        }
+
+        if (dataToUpdate.dataExpiracao === '') {
+            dataToUpdate.dataExpiracao = null;
         }
 
         await db.promise().query('UPDATE licenses SET ? WHERE id = ?', [dataToUpdate, id]);
