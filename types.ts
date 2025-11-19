@@ -76,6 +76,7 @@ export interface License {
     observacoes?: string;
     approval_status?: 'pending_approval' | 'approved' | 'rejected';
     rejection_reason?: string;
+    created_by_id?: number;
 }
 
 export interface EquipmentHistory {

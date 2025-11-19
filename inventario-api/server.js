@@ -634,9 +634,12 @@ app.put('/api/equipment/:id', async (req, res) => {
         if(equipment.serial && equipment.serial !== oldEquipment.serial) {
             equipment.qrCode = JSON.stringify({ id: equipment.id, serial: equipment.serial, type: 'equipment' });
         }
+        
+        // FIX: Remove 'id' from the object being passed to the SET clause to prevent database errors.
+        const { id: equipmentId, ...updateData } = equipment;
 
         const sql = "UPDATE equipment SET ? WHERE id = ?";
-        await db.promise().query(sql, [equipment, id]);
+        await db.promise().query(sql, [updateData, id]);
         
         if (changes.length > 0) {
             await recordHistory(id, username, changes);
@@ -809,8 +812,13 @@ app.post('/api/licenses', async (req, res) => {
 app.put('/api/licenses/:id', (req, res) => {
     const { id } = req.params;
     const { license, username } = req.body;
-    db.query("UPDATE licenses SET ? WHERE id = ?", [license, id], (err) => {
-        if (err) return res.status(500).json({ message: "Database error", error: err });
+    // FIX: Remove 'id' from the object being passed to the SET clause to prevent database errors.
+    const { id: licenseId, ...updateData } = license;
+    db.query("UPDATE licenses SET ? WHERE id = ?", [updateData, id], (err) => {
+        if (err) {
+            console.error("License update DB error:", err);
+            return res.status(500).json({ message: "Database error", error: err });
+        }
         logAction(username, 'UPDATE', 'LICENSE', id, `Updated license for product: ${license.produto}`);
         res.json({ ...license, id: parseInt(id) });
     });
