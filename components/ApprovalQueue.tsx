@@ -6,7 +6,7 @@ import Icon from './common/Icon';
 interface ApprovalItem {
     id: number;
     name: string;
-    type: 'equipment' | 'license';
+    itemType: 'equipment' | 'license';
 }
 
 interface ApprovalQueueProps {
@@ -83,11 +83,11 @@ const ApprovalQueue: React.FC<ApprovalQueueProps> = ({ currentUser, onAction }) 
     const handleApprove = async (item: ApprovalItem) => {
         setIsProcessing(item.id);
         try {
-            await approveItem(item.type, item.id, currentUser.username);
+            await approveItem(item.itemType, item.id, currentUser.username);
             await fetchApprovals(); 
             onAction(); 
         } catch (error) {
-            console.error(`Failed to approve ${item.type}`, error);
+            console.error(`Failed to approve ${item.itemType}`, error);
             alert("Falha ao aprovar o item.");
         } finally {
             setIsProcessing(null);
@@ -103,12 +103,12 @@ const ApprovalQueue: React.FC<ApprovalQueueProps> = ({ currentUser, onAction }) 
         
         setIsProcessing(itemToReject.id);
         try {
-            await rejectItem(itemToReject.type, itemToReject.id, currentUser.username, reason);
+            await rejectItem(itemToReject.itemType, itemToReject.id, currentUser.username, reason);
             setItemToReject(null);
             await fetchApprovals();
             onAction();
         } catch (error) {
-            console.error(`Failed to reject ${itemToReject.type}`, error);
+            console.error(`Failed to reject ${itemToReject.itemType}`, error);
             alert("Falha ao rejeitar o item.");
         } finally {
             setIsProcessing(null);
@@ -133,10 +133,10 @@ const ApprovalQueue: React.FC<ApprovalQueueProps> = ({ currentUser, onAction }) 
                 <h3 className="text-xl font-semibold mb-4 text-brand-dark dark:text-dark-text-primary">Solicitações Pendentes de Aprovação ({approvals.length})</h3>
                 <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
                     {approvals.map(item => (
-                        <div key={`${item.type}-${item.id}`} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-dark-bg rounded-md">
+                        <div key={`${item.itemType}-${item.id}`} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-dark-bg rounded-md">
                             <div>
-                                <span className={`text-xs font-bold uppercase py-1 px-2 rounded-md mr-3 ${item.type === 'equipment' ? 'bg-blue-200 text-blue-800' : 'bg-green-200 text-green-800'}`}>
-                                    {item.type === 'equipment' ? 'Equip.' : 'Licença'}
+                                <span className={`text-xs font-bold uppercase py-1 px-2 rounded-md mr-3 ${item.itemType === 'equipment' ? 'bg-blue-200 text-blue-800' : 'bg-green-200 text-green-800'}`}>
+                                    {item.itemType === 'equipment' ? 'Equip.' : 'Licença'}
                                 </span>
                                 <span className="text-gray-800 dark:text-dark-text-primary">{item.name}</span>
                             </div>

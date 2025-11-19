@@ -1077,8 +1077,8 @@ app.get('/api/audit-log', (req, res) => {
 // --- APPROVALS ---
 app.get('/api/approvals/pending', async (req, res) => {
     try {
-        const [equipment] = await db.promise().query("SELECT id, equipamento as name, 'equipment' as `type` FROM equipment WHERE approval_status = 'pending_approval'");
-        const [licenses] = await db.promise().query("SELECT id, produto as name, 'license' as `type` FROM licenses WHERE approval_status = 'pending_approval'");
+        const [equipment] = await db.promise().query("SELECT id, equipamento as name, 'equipment' as itemType FROM equipment WHERE approval_status = 'pending_approval'");
+        const [licenses] = await db.promise().query("SELECT id, produto as name, 'license' as itemType FROM licenses WHERE approval_status = 'pending_approval'");
         res.json([...equipment, ...licenses]);
     } catch (err) {
         console.error("Error fetching pending approvals:", err);

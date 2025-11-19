@@ -103,7 +103,7 @@ export const getAuditLog = (): Promise<AuditLogEntry[]> => {
     return apiRequest('/audit-log');
 };
 
-export const getPendingApprovals = (): Promise<{id: number, name: string, type: 'equipment' | 'license'}[]> => {
+export const getPendingApprovals = (): Promise<{id: number, name: string, itemType: 'equipment' | 'license'}[]> => {
     return apiRequest('/approvals/pending');
 };
 
