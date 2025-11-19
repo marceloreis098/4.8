@@ -54,12 +54,10 @@ const DataConsolidation: React.FC<{ currentUser: User }> = ({ currentUser }) => 
     const [error, setError] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
 
-    const splitCsvLine = (line: string): string[] => {
+    const splitCsvLine = (line: string, separator: string): string[] => {
         const result: string[] = [];
         let current = '';
         let inQuote = false;
-        // Handle comma as separator
-        const separator = ',';
         for (let i = 0; i < line.length; i++) {
             const char = line[i];
             if (char === '"') {
@@ -76,17 +74,20 @@ const DataConsolidation: React.FC<{ currentUser: User }> = ({ currentUser }) => 
     };
 
     const parseCsv = (fileText: string, mappings: { [key: string]: keyof Equipment }): PartialEquipment[] => {
-        const lines = fileText.trim().split(/\r\n|\n/);
+        const cleanText = fileText.replace(/^\uFEFF/, ''); // Remove BOM
+        const lines = cleanText.trim().split(/\r\n|\n/);
         if (lines.length < 2) throw new Error("O arquivo CSV deve conter um cabeçalho e pelo menos uma linha de dados.");
 
-        const headerLine = lines[0].endsWith(',') ? lines[0].slice(0, -1) : lines[0];
-        const header = splitCsvLine(headerLine).map(h => h.trim().toUpperCase());
+        const headerLine = lines[0].endsWith(',') || lines[0].endsWith(';') ? lines[0].slice(0, -1) : lines[0];
+        // Auto-detect separator by checking which is more prevalent in the header
+        const separator = (headerLine.match(/;/g) || []).length > (headerLine.match(/,/g) || []).length ? ';' : ',';
+        const header = splitCsvLine(headerLine, separator).map(h => h.trim().toUpperCase());
         const rows = lines.slice(1);
 
         return rows.map(row => {
             if (!row.trim()) return null;
 
-            const values = splitCsvLine(row);
+            const values = splitCsvLine(row, separator);
             const entry: PartialEquipment = {};
 
             header.forEach((colName, index) => {
@@ -116,7 +117,6 @@ const DataConsolidation: React.FC<{ currentUser: User }> = ({ currentUser }) => 
             const baseText = await baseFile.text();
             const absoluteText = await absoluteFile.text();
             
-            // FIX: Normalized all mapping keys to be uppercase with no spaces/slashes for robust matching.
             const baseMappings: { [key: string]: keyof Equipment } = {
                 'EQUIPAMENTO': 'equipamento', 'GARANTIA': 'garantia', 'PATRIMONIO': 'patrimonio', 'SERIAL': 'serial',
                 'USUARIOATUAL': 'usuarioAtual', 'USUARIOANTERIOR': 'usuarioAnterior', 'LOCAL': 'local', 'SETOR': 'setor',
@@ -181,7 +181,6 @@ const DataConsolidation: React.FC<{ currentUser: User }> = ({ currentUser }) => 
         setError(null);
         try {
             const dataToSave = consolidatedData.map(item => ({...item, id: undefined})) as Omit<Equipment, 'id'>[];
-            // FIX: Pass currentUser.username to importEquipment API call for logging and authentication purposes.
             const result = await importEquipment(dataToSave, currentUser.username);
             if (result.success) {
                 alert('Inventário consolidado e salvo com sucesso! A aplicação será recarregada para refletir as mudanças.');
