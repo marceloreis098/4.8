@@ -613,40 +613,41 @@ app.post('/api/equipment', async (req, res) => {
 });
 
 app.put('/api/equipment/:id', async (req, res) => {
-    const { id } = req.params;
-    const { equipment, username } = req.body;
     try {
+        const { id } = req.params;
+        const { equipment, username } = req.body;
+        // FIX: Create a shallow copy of the equipment object and delete the 'id' property.
+        // Passing the ID in the SET clause of an UPDATE statement is invalid SQL and causes a database error.
+        const dataToUpdate = { ...equipment };
+        delete dataToUpdate.id;
+
         const [oldEquipmentRows] = await db.promise().query('SELECT * FROM equipment WHERE id = ?', [id]);
         if (oldEquipmentRows.length === 0) {
             return res.status(404).json({ message: "Equipment not found" });
         }
         const oldEquipment = oldEquipmentRows[0];
 
-        const changes = Object.keys(equipment).reduce((acc, key) => {
+        const changes = Object.keys(dataToUpdate).reduce((acc, key) => {
             const oldValue = oldEquipment[key] instanceof Date ? oldEquipment[key].toISOString().split('T')[0] : oldEquipment[key];
-            const newValue = equipment[key];
+            const newValue = dataToUpdate[key];
             if (String(oldValue || '') !== String(newValue || '')) {
                 acc.push({ field: key, oldValue, newValue });
             }
             return acc;
         }, []);
 
-        if (equipment.serial && equipment.serial !== oldEquipment.serial) {
-            equipment.qrCode = JSON.stringify({ id: equipment.id, serial: equipment.serial, type: 'equipment' });
+        if (dataToUpdate.serial && dataToUpdate.serial !== oldEquipment.serial) {
+            dataToUpdate.qrCode = JSON.stringify({ id: equipment.id, serial: dataToUpdate.serial, type: 'equipment' });
         }
 
-        const updateData = { ...equipment };
-        delete updateData.id;
-
-        const sql = "UPDATE equipment SET ? WHERE id = ?";
-        await db.promise().query(sql, [updateData, id]);
+        await db.promise().query('UPDATE equipment SET ? WHERE id = ?', [dataToUpdate, id]);
 
         if (changes.length > 0) {
             await recordHistory(id, username, changes);
-            logAction(username, 'UPDATE', 'EQUIPMENT', id, `Updated equipment: ${equipment.equipamento}. Changes: ${changes.map(c => c.field).join(', ')}`);
+            logAction(username, 'UPDATE', 'EQUIPMENT', id, `Updated equipment: ${dataToUpdate.equipamento}. Changes: ${changes.map(c => c.field).join(', ')}`);
         }
 
-        res.json({ ...equipment, id: parseInt(id) });
+        res.json({ ...dataToUpdate, id: parseInt(id) });
     } catch (err) {
         console.error("Update equipment error:", err);
         res.status(500).json({ message: "Database error" });
@@ -810,20 +811,21 @@ app.post('/api/licenses', async (req, res) => {
 });
 
 app.put('/api/licenses/:id', async (req, res) => {
-    const { id } = req.params;
-    const { license, username } = req.body;
     try {
-        const updateData = { ...license };
-        delete updateData.id;
+        const { id } = req.params;
+        const { license, username } = req.body;
+        // FIX: Create a shallow copy of the license object and delete the 'id' property.
+        // Passing the ID in the SET clause of an UPDATE statement is invalid SQL and causes a database error.
+        const dataToUpdate = { ...license };
+        delete dataToUpdate.id;
 
-        const sql = "UPDATE licenses SET ? WHERE id = ?";
-        await db.promise().query(sql, [updateData, id]);
-
+        await db.promise().query('UPDATE licenses SET ? WHERE id = ?', [dataToUpdate, id]);
+        
         logAction(username, 'UPDATE', 'LICENSE', id, `Updated license for product: ${license.produto}`);
         res.json({ ...license, id: parseInt(id) });
     } catch (err) {
         console.error("License update DB error:", err);
-        res.status(500).json({ message: "Database error" });
+        return res.status(500).json({ message: "Database error" });
     }
 });
 
