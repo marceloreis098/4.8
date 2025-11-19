@@ -615,10 +615,11 @@ app.post('/api/equipment', async (req, res) => {
 app.put('/api/equipment/:id', async (req, res) => {
     const { id } = req.params;
     const { equipment, username } = req.body;
-
     try {
         const [oldEquipmentRows] = await db.promise().query('SELECT * FROM equipment WHERE id = ?', [id]);
-        if (oldEquipmentRows.length === 0) return res.status(404).json({ message: "Equipment not found" });
+        if (oldEquipmentRows.length === 0) {
+            return res.status(404).json({ message: "Equipment not found" });
+        }
         const oldEquipment = oldEquipmentRows[0];
 
         const changes = Object.keys(equipment).reduce((acc, key) => {
@@ -630,26 +631,25 @@ app.put('/api/equipment/:id', async (req, res) => {
             return acc;
         }, []);
 
-        // Re-generate QR code if serial changes
-        if(equipment.serial && equipment.serial !== oldEquipment.serial) {
+        if (equipment.serial && equipment.serial !== oldEquipment.serial) {
             equipment.qrCode = JSON.stringify({ id: equipment.id, serial: equipment.serial, type: 'equipment' });
         }
-        
-        // FIX: Remove 'id' from the object being passed to the SET clause to prevent database errors.
-        const { id: equipmentId, ...updateData } = equipment;
+
+        const updateData = { ...equipment };
+        delete updateData.id;
 
         const sql = "UPDATE equipment SET ? WHERE id = ?";
         await db.promise().query(sql, [updateData, id]);
-        
+
         if (changes.length > 0) {
             await recordHistory(id, username, changes);
             logAction(username, 'UPDATE', 'EQUIPMENT', id, `Updated equipment: ${equipment.equipamento}. Changes: ${changes.map(c => c.field).join(', ')}`);
         }
-        
+
         res.json({ ...equipment, id: parseInt(id) });
     } catch (err) {
         console.error("Update equipment error:", err);
-        res.status(500).json({ message: "Database error", error: err });
+        res.status(500).json({ message: "Database error" });
     }
 });
 
@@ -809,19 +809,22 @@ app.post('/api/licenses', async (req, res) => {
     }
 });
 
-app.put('/api/licenses/:id', (req, res) => {
+app.put('/api/licenses/:id', async (req, res) => {
     const { id } = req.params;
     const { license, username } = req.body;
-    // FIX: Remove 'id' from the object being passed to the SET clause to prevent database errors.
-    const { id: licenseId, ...updateData } = license;
-    db.query("UPDATE licenses SET ? WHERE id = ?", [updateData, id], (err) => {
-        if (err) {
-            console.error("License update DB error:", err);
-            return res.status(500).json({ message: "Database error", error: err });
-        }
+    try {
+        const updateData = { ...license };
+        delete updateData.id;
+
+        const sql = "UPDATE licenses SET ? WHERE id = ?";
+        await db.promise().query(sql, [updateData, id]);
+
         logAction(username, 'UPDATE', 'LICENSE', id, `Updated license for product: ${license.produto}`);
         res.json({ ...license, id: parseInt(id) });
-    });
+    } catch (err) {
+        console.error("License update DB error:", err);
+        res.status(500).json({ message: "Database error" });
+    }
 });
 
 app.delete('/api/licenses/:id', (req, res) => {

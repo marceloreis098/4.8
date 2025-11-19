@@ -143,7 +143,7 @@ const LicenseFormModal: React.FC<{
     onSave: () => void;
     currentUser: User;
 }> = ({ license, productNames, onClose, onSave, currentUser }) => {
-    const [formData, setFormData] = useState<Omit<License, 'id' | 'approval_status' | 'rejection_reason'>>({
+    const [formData, setFormData] = useState<Omit<License, 'id' | 'approval_status' | 'rejection_reason' | 'created_by_id'>>({
         produto: '',
         tipoLicenca: '',
         chaveSerial: '',
@@ -376,9 +376,11 @@ const LicenseControl: React.FC<{ currentUser: User }> = ({ currentUser }) => {
             } else {
                 alert(`Falha ao salvar o total de licenças: ${result.message}. Tente novamente.`);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Failed to save license totals:", error);
-            alert("Falha ao salvar o total de licenças. Tente novamente. Detalhes: " + error.message);
+            // FIX: Ensure error is handled as 'unknown' and a string message is constructed safely.
+            const message = error instanceof Error ? error.message : String(error);
+            alert("Falha ao salvar o total de licenças. Tente novamente. Detalhes: " + message);
         }
     };
 
@@ -440,9 +442,11 @@ const LicenseControl: React.FC<{ currentUser: User }> = ({ currentUser }) => {
                 alert(`Erro ao salvar alterações: ${result.message}`);
             }
     
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Failed to save product name changes:", error);
-            alert(`Erro ao salvar alterações: ${error.message}`);
+            // FIX: Ensure error is handled as 'unknown' and a string message is constructed safely before passing to alert.
+            const message = error instanceof Error ? error.message : String(error);
+            alert(`Erro ao salvar alterações: ${message}`);
         } finally {
             // 5. Reload all data from server to ensure consistency
             loadLicensesAndProducts();
@@ -632,9 +636,7 @@ const LicenseControl: React.FC<{ currentUser: User }> = ({ currentUser }) => {
         const date = parseDateString(dateStr);
         if (!date) return <span className="font-semibold flex items-center gap-1.5 text-red-500"><Icon name="TriangleAlert" size={16} /> Data Inválida</span>;
         
-        // FIX: Pass the parsed Date object to the helper functions instead of the original string.
         const expiring = isExpiringSoon(date);
-        // FIX: Pass the parsed Date object to the helper functions instead of the original string.
         const expired = isExpired(date);
         const color = expired ? 'text-red-500 dark:text-red-400' : expiring ? 'text-yellow-500 dark:text-yellow-400' : '';
         const icon = expired ? 'TriangleAlert' : expiring ? 'Timer' : null;
