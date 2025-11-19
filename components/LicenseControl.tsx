@@ -150,6 +150,7 @@ const LicenseFormModal: React.FC<{
         dataExpiracao: '',
         usuario: '',
         cargo: '',
+        empresa: '',
         setor: '',
         gestor: '',
         centroCusto: '',
@@ -170,6 +171,7 @@ const LicenseFormModal: React.FC<{
                 dataExpiracao: license.dataExpiracao || '',
                 usuario: license.usuario,
                 cargo: license.cargo || '',
+                empresa: license.empresa || '',
                 setor: license.setor || '',
                 gestor: license.gestor || '',
                 centroCusto: license.centroCusto || '',
@@ -236,6 +238,7 @@ const LicenseFormModal: React.FC<{
                     <input type="text" name="chaveSerial" placeholder="Chave/Serial" value={formData.chaveSerial} onChange={handleChange} className="p-2 border dark:border-dark-border rounded-md bg-white dark:bg-gray-800" />
                     
                     <input type="text" name="usuario" placeholder="Usuário Atribuído" value={formData.usuario} onChange={handleChange} className="p-2 border dark:border-dark-border rounded-md bg-white dark:bg-gray-800" />
+                    <input type="text" name="empresa" placeholder="Empresa" value={formData.empresa || ''} onChange={handleChange} className="p-2 border dark:border-dark-border rounded-md bg-white dark:bg-gray-800" />
                     <input type="text" name="cargo" placeholder="Cargo" value={formData.cargo} onChange={handleChange} className="p-2 border dark:border-dark-border rounded-md bg-white dark:bg-gray-800" />
 
                     <input type="text" name="setor" placeholder="Setor" value={formData.setor} onChange={handleChange} className="p-2 border dark:border-dark-border rounded-md bg-white dark:bg-gray-800" />

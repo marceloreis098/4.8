@@ -66,6 +66,7 @@ export interface License {
     dataExpiracao?: string;
     usuario: string;
     cargo?: string;
+    empresa?: string;
     setor?: string;
     gestor?: string;
     centroCusto?: string;
