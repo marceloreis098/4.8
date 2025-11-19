@@ -836,13 +836,17 @@ app.put('/api/licenses/:id', async (req, res) => {
         ];
 
         const dataToUpdate = {};
-        for (const key in license) {
-            if (Object.prototype.hasOwnProperty.call(license, key) && allowedFields.includes(key)) {
-                dataToUpdate[key] = license[key] === undefined ? null : license[key];
+        // Corrected loop: iterate over the safe list of fields
+        for (const key of allowedFields) {
+            // Check if the incoming object has this property defined
+            if (Object.prototype.hasOwnProperty.call(license, key)) {
+                // If it exists, add it to our update object.
+                dataToUpdate[key] = license[key];
             }
         }
         
         if (Object.keys(dataToUpdate).length === 0) {
+            // Nothing to update, just return the current data
             const [currentRow] = await db.promise().query('SELECT * FROM licenses WHERE id = ?', [id]);
             return res.json(currentRow.length > 0 ? currentRow[0] : {});
         }
