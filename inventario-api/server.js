@@ -231,7 +231,13 @@ const runMigrations = async () => {
             },
             { // Migration 23: Add 'empresa' column to licenses
                 id: 23, sql: `ALTER TABLE licenses ADD COLUMN empresa VARCHAR(255) NULL;`
-            }
+            },
+            // CORREÇÃO: Migrações adicionais para garantir que as colunas existam na tabela licenses
+            // O diagnóstico mostrou que essas colunas estavam faltando.
+            { id: 24, sql: "ALTER TABLE licenses ADD COLUMN observacoes TEXT;" },
+            { id: 25, sql: "ALTER TABLE licenses ADD COLUMN approval_status VARCHAR(50) DEFAULT 'approved';" },
+            { id: 26, sql: "ALTER TABLE licenses ADD COLUMN rejection_reason TEXT;" },
+            { id: 27, sql: "ALTER TABLE licenses ADD COLUMN empresa VARCHAR(255) NULL;" }
         ];
         
         const migrationsToRun = migrations.filter(m => !executedMigrationIds.has(m.id));
