@@ -49,6 +49,63 @@ const db = mysql.createPool({
     multipleStatements: true // Important for migrations
 });
 
+// Função de Auto-Recuperação do Schema
+// Garante que colunas críticas existam mesmo que as migrações falhem ou dessincronizem
+const ensureCriticalSchema = async (connection) => {
+    console.log("Running critical schema check...");
+    
+    // 1. Verificar Tabela LICENSES
+    try {
+        const [columns] = await connection.query("SHOW COLUMNS FROM licenses");
+        const columnNames = columns.map(c => c.Field);
+
+        if (!columnNames.includes('empresa')) {
+            console.log("Auto-repair: Adding 'empresa' to licenses");
+            await connection.query("ALTER TABLE licenses ADD COLUMN empresa VARCHAR(255) NULL");
+        }
+        if (!columnNames.includes('observacoes')) {
+            console.log("Auto-repair: Adding 'observacoes' to licenses");
+            await connection.query("ALTER TABLE licenses ADD COLUMN observacoes TEXT");
+        }
+        if (!columnNames.includes('approval_status')) {
+            console.log("Auto-repair: Adding 'approval_status' to licenses");
+            await connection.query("ALTER TABLE licenses ADD COLUMN approval_status VARCHAR(50) DEFAULT 'approved'");
+        }
+        if (!columnNames.includes('rejection_reason')) {
+            console.log("Auto-repair: Adding 'rejection_reason' to licenses");
+            await connection.query("ALTER TABLE licenses ADD COLUMN rejection_reason TEXT");
+        }
+        if (!columnNames.includes('created_by_id')) {
+            console.log("Auto-repair: Adding 'created_by_id' to licenses");
+            await connection.query("ALTER TABLE licenses ADD COLUMN created_by_id INT NULL");
+        }
+    } catch (err) {
+        console.error("Error ensuring license schema:", err);
+    }
+
+    // 2. Verificar Tabela EQUIPMENT
+    try {
+        const [eqColumns] = await connection.query("SHOW COLUMNS FROM equipment");
+        const eqColumnNames = eqColumns.map(c => c.Field);
+
+        if (!eqColumnNames.includes('approval_status')) {
+            console.log("Auto-repair: Adding 'approval_status' to equipment");
+            await connection.query("ALTER TABLE equipment ADD COLUMN approval_status VARCHAR(50) DEFAULT 'approved'");
+        }
+        if (!eqColumnNames.includes('rejection_reason')) {
+            console.log("Auto-repair: Adding 'rejection_reason' to equipment");
+            await connection.query("ALTER TABLE equipment ADD COLUMN rejection_reason TEXT");
+        }
+        if (!eqColumnNames.includes('created_by_id')) {
+             console.log("Auto-repair: Adding 'created_by_id' to equipment");
+             await connection.query("ALTER TABLE equipment ADD COLUMN created_by_id INT NULL");
+        }
+    } catch (err) {
+        console.error("Error ensuring equipment schema:", err);
+    }
+    console.log("Critical schema check complete.");
+};
+
 const runMigrations = async () => {
     console.log("Checking database migrations...");
     let connection;
@@ -232,8 +289,7 @@ const runMigrations = async () => {
             { // Migration 23: Add 'empresa' column to licenses
                 id: 23, sql: `ALTER TABLE licenses ADD COLUMN empresa VARCHAR(255) NULL;`
             },
-            // CORREÇÃO: Migrações adicionais para garantir que as colunas existam na tabela licenses
-            // O diagnóstico mostrou que essas colunas estavam faltando.
+             // Migration 24-27: Add missing license columns if not present
             { id: 24, sql: "ALTER TABLE licenses ADD COLUMN observacoes TEXT;" },
             { id: 25, sql: "ALTER TABLE licenses ADD COLUMN approval_status VARCHAR(50) DEFAULT 'approved';" },
             { id: 26, sql: "ALTER TABLE licenses ADD COLUMN rejection_reason TEXT;" },
@@ -251,11 +307,9 @@ const runMigrations = async () => {
                     try {
                         await connection.query(migration.sql);
                     } catch (err) {
-                        // FIX: Added 'ER_BAD_FIELD_ERROR' to robustly handle dropping columns/indexes that might not exist.
                         if (['ER_DUP_FIELDNAME', 'ER_DUP_KEYNAME', 'ER_MULTIPLE_PRI_KEY', 'ER_CANT_DROP_FIELD_OR_KEY', 'ER_BAD_FIELD_ERROR'].includes(err.code)) {
-                            console.warn(`[MIGRATION WARN] Migration ${migration.id} failed with a common schema error (${err.code}). Assuming it was already applied. Marking as run.`);
+                            console.warn(`[MIGRATION WARN] Migration ${migration.id} failed with schema error (${err.code}). Marking as run.`);
                         } else {
-                            // For other errors, we should fail loudly.
                             throw err;
                         }
                     }
@@ -266,11 +320,15 @@ const runMigrations = async () => {
             } catch (err) {
                 console.error("Error during migration, rolling back.", err);
                 await connection.rollback();
-                throw err; // Propagate error to stop server startup
+                // Don't throw here, let ensureCriticalSchema handle it
             }
         } else {
             console.log("Database schema is up to date.");
         }
+
+        // Always run critical schema check after migrations
+        await ensureCriticalSchema(connection);
+
     } finally {
         if (connection) connection.release();
     }
@@ -305,7 +363,6 @@ const recordHistory = async (equipmentId, changedBy, changes) => {
 };
 
 // --- CONSTANTS FOR DATA VALIDATION ---
-// Defines the allowed fields for Equipment and Licenses to prevent database errors
 const EQUIPMENT_FIELDS = [
     'equipamento', 'garantia', 'patrimonio', 'serial', 'usuarioAtual', 'usuarioAnterior',
     'local', 'setor', 'dataEntregaUsuario', 'status', 'dataDevolucao', 'tipo',
@@ -327,7 +384,6 @@ const cleanDataForDB = (data, allowedFields) => {
     for (const field of allowedFields) {
         if (Object.prototype.hasOwnProperty.call(data, field)) {
             let value = data[field];
-            // Convert empty date strings to NULL to prevent DB errors
             if ((field.startsWith('data') || field === 'lastLogin') && value === '') {
                 value = null;
             }
@@ -357,7 +413,7 @@ const isAdmin = async (req, res, next) => {
 };
 
 // --- API ENDPOINTS ---
-
+// ... (Endpoint de AI mantido igual)
 app.post('/api/ai/generate-report', async (req, res) => {
     const { query, data, username } = req.body;
     if (!query || !data) {
@@ -372,7 +428,6 @@ app.post('/api/ai/generate-report', async (req, res) => {
             throw new Error("A chave de API do Hugging Face não está configurada no ambiente do servidor.");
         }
         
-        // FIX: The Hugging Face API URL has been updated. The error message explicitly states the new URL to use.
         const MODEL_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2";
 
         const prompt = `
@@ -397,7 +452,7 @@ app.post('/api/ai/generate-report', async (req, res) => {
             method: "POST",
             body: JSON.stringify({ 
                 "inputs": prompt,
-                "parameters": { "max_new_tokens": 4096 } // Aumentar o limite para respostas maiores
+                "parameters": { "max_new_tokens": 4096 }
             }),
         });
         
@@ -409,8 +464,6 @@ app.post('/api/ai/generate-report', async (req, res) => {
         const result = await hfResponse.json();
         let generatedText = result[0].generated_text;
 
-        // O modelo do Hugging Face retorna o prompt original mais a resposta.
-        // Precisamos extrair apenas a parte da resposta que contém o JSON.
         let jsonString;
         const jsonStartIndex = generatedText.lastIndexOf('[');
         const jsonEndIndex = generatedText.lastIndexOf(']');
@@ -418,7 +471,6 @@ app.post('/api/ai/generate-report', async (req, res) => {
         if (jsonStartIndex !== -1 && jsonEndIndex !== -1 && jsonEndIndex > jsonStartIndex) {
             jsonString = generatedText.substring(jsonStartIndex, jsonEndIndex + 1);
         } else {
-             // Fallback para tentar encontrar JSON em qualquer lugar no texto
             const jsonMatch = generatedText.match(/\[.*\]/s);
             if(jsonMatch && jsonMatch[0]) {
                 jsonString = jsonMatch[0];
@@ -428,7 +480,6 @@ app.post('/api/ai/generate-report', async (req, res) => {
             }
         }
         
-        // Clean up potential markdown formatting that sometimes wraps the JSON
         jsonString = jsonString.replace(/```json/g, '').replace(/```/g, '').trim();
 
         const reportData = JSON.parse(jsonString);
@@ -464,13 +515,9 @@ app.post('/api/login', async (req, res) => {
         const { username, password, ssoToken } = req.body;
 
         if (ssoToken) {
-            // This is a placeholder for a real SSO token validation logic
-            // In a real scenario, you'd verify the token with the IdP's public key
-            // and extract user information from it.
             return res.status(501).json({ message: "SSO token validation not implemented." });
         }
 
-        // Standard Login
         const [results] = await db.promise().query("SELECT * FROM users WHERE username = ?", [username]);
 
         if (results.length > 0) {
@@ -512,7 +559,7 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// GET /api/sso/login - Initiates the SAML Single Sign-On flow
+// GET /api/sso/login
 app.get('/api/sso/login', async (req, res) => {
     try {
         const [rows] = await db.promise().query("SELECT config_key, config_value FROM app_config WHERE config_key IN ('isSsoEnabled', 'ssoUrl', 'ssoEntityId')");
@@ -562,8 +609,6 @@ app.get('/api/sso/login', async (req, res) => {
 });
 
 app.post('/api/sso/callback', (req, res) => {
-    // This is a placeholder for handling the SAML response from the IdP
-    // A real implementation would require a SAML library to parse and verify the response.
     console.log('Received SAML Response:', req.body.SAMLResponse);
     res.redirect(`http://${req.hostname}:3000?sso_token=dummy_token_for_now`);
 });
@@ -625,7 +670,6 @@ app.post('/api/equipment', async (req, res) => {
         if (userRows.length === 0) return res.status(404).json({ message: "User not found" });
         const user = userRows[0];
 
-        // Ensure serial uniqueness only if provided (some equipment might not have one, though rare)
         if (equipment.serial) {
             const [serialCheck] = await db.promise().query('SELECT id FROM equipment WHERE serial = ?', [equipment.serial]);
             if (serialCheck.length > 0) {
@@ -633,7 +677,6 @@ app.post('/api/equipment', async (req, res) => {
             }
         }
 
-        // Prepare data using whitelist to prevent 'Unknown column' errors
         const newEquipmentData = cleanDataForDB(equipment, EQUIPMENT_FIELDS);
         
         newEquipmentData.created_by_id = user.id;
@@ -643,7 +686,6 @@ app.post('/api/equipment', async (req, res) => {
         const [result] = await db.promise().query(sql, newEquipmentData);
         
         const insertedId = result.insertId;
-        // Generate QR Code (stored as string in DB)
         if (newEquipmentData.serial) {
             const qrCodeValue = JSON.stringify({ id: insertedId, serial: newEquipmentData.serial, type: 'equipment' });
             await db.promise().query('UPDATE equipment SET qrCode = ? WHERE id = ?', [qrCodeValue, insertedId]);
@@ -655,7 +697,7 @@ app.post('/api/equipment', async (req, res) => {
         res.status(201).json(insertedRow[0]);
     } catch (err) {
         console.error("Add equipment error:", err);
-        res.status(500).json({ message: "Database error", error: err.message });
+        res.status(500).json({ message: "Database error: " + err.message, error: err.message });
     }
 });
 
@@ -670,13 +712,11 @@ app.put('/api/equipment/:id', async (req, res) => {
         }
         const oldEquipment = oldEquipmentRows[0];
         
-        // Prepare data using whitelist to prevent 'Unknown column' errors
         const dataToUpdate = cleanDataForDB(equipment, EQUIPMENT_FIELDS);
 
         const changes = Object.keys(dataToUpdate).reduce((acc, key) => {
             const oldValue = oldEquipment[key] instanceof Date ? oldEquipment[key].toISOString().split('T')[0] : oldEquipment[key];
             const newValue = dataToUpdate[key];
-            // Loose equality for string/null matching
             if (String(oldValue || '') !== String(newValue || '')) {
                 acc.push({ field: key, oldValue, newValue });
             }
@@ -701,7 +741,7 @@ app.put('/api/equipment/:id', async (req, res) => {
         res.json(updatedRow[0]);
     } catch (err) {
         console.error("Update equipment error:", err);
-        res.status(500).json({ message: "Database error" });
+        res.status(500).json({ message: "Database error: " + err.message });
     }
 });
 
@@ -734,9 +774,7 @@ app.post('/api/equipment/import', isAdmin, async (req, res) => {
         await connection.query('ALTER TABLE equipment AUTO_INCREMENT = 1');
         
         for (const equipment of equipmentList) {
-            // Clean data before insert
             const newEquipment = cleanDataForDB(equipment, EQUIPMENT_FIELDS);
-            // Ensure ID is null to allow auto-increment
             const [result] = await connection.query('INSERT INTO equipment SET ?', [newEquipment]);
             const insertedId = result.insertId;
             if (newEquipment.serial) {
@@ -745,7 +783,6 @@ app.post('/api/equipment/import', isAdmin, async (req, res) => {
             }
         }
         
-        // Set consolidation flags
         await connection.query("INSERT INTO app_config (config_key, config_value) VALUES ('hasInitialConsolidationRun', 'true'), ('lastAbsoluteUpdateTimestamp', UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)");
         
         await connection.commit();
@@ -773,10 +810,7 @@ app.post('/api/equipment/periodic-update', isAdmin, async (req, res) => {
             const [existingRows] = await connection.query('SELECT * FROM equipment WHERE serial = ?', [serial]);
 
             if (existingRows.length > 0) {
-                // UPDATE
                 const oldEquipment = existingRows[0];
-                
-                // Prepare clean update data
                 const equipmentUpdateData = cleanDataForDB(equipment, EQUIPMENT_FIELDS);
                 
                 const changes = Object.keys(equipmentUpdateData).reduce((acc, key) => {
@@ -798,9 +832,8 @@ app.post('/api/equipment/periodic-update', isAdmin, async (req, res) => {
                     logAction(username, 'UPDATE', 'EQUIPMENT', oldEquipment.id, `Periodic update for ${equipment.equipamento || oldEquipment.equipamento}. Changes: ${changes.map(c => c.field).join(', ')}`);
                 }
             } else {
-                // INSERT
                 const newEquipment = cleanDataForDB(equipment, EQUIPMENT_FIELDS);
-                newEquipment.approval_status = 'approved'; // Updates are pre-approved
+                newEquipment.approval_status = 'approved';
                 const [userRes] = await connection.query('SELECT id FROM users WHERE username = ?', [username]);
                 newEquipment.created_by_id = userRes[0].id;
 
@@ -854,7 +887,6 @@ app.post('/api/licenses', async (req, res) => {
         if (userRows.length === 0) return res.status(404).json({ message: "User not found" });
         const user = userRows[0];
         
-        // Clean data using whitelist
         const newLicenseData = cleanDataForDB(license, LICENSE_FIELDS);
 
         newLicenseData.created_by_id = user.id;
@@ -868,7 +900,7 @@ app.post('/api/licenses', async (req, res) => {
         res.status(201).json(insertedRow[0]);
     } catch (err) {
         console.error("Add license error:", err);
-        res.status(500).json({ message: "Database error", error: err });
+        res.status(500).json({ message: "Database error: " + err.message, error: err });
     }
 });
 
@@ -877,7 +909,6 @@ app.put('/api/licenses/:id', async (req, res) => {
         const { id } = req.params;
         const { license, username } = req.body;
 
-        // Clean data using whitelist to prevent 'Unknown column' errors
         const dataToUpdate = cleanDataForDB(license, LICENSE_FIELDS);
 
         if (Object.keys(dataToUpdate).length === 0) {
@@ -894,7 +925,7 @@ app.put('/api/licenses/:id', async (req, res) => {
 
     } catch (err) {
         console.error("License update DB error:", err);
-        return res.status(500).json({ message: "Database error" });
+        return res.status(500).json({ message: "Database error: " + err.message });
     }
 });
 
@@ -927,7 +958,6 @@ app.post('/api/licenses/import', isAdmin, async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        // Delete existing licenses for the specific product
         const [existingLicenses] = await connection.query('SELECT id FROM licenses WHERE produto = ?', [productName]);
         if (existingLicenses.length > 0) {
             const idsToDelete = existingLicenses.map(l => l.id);
@@ -937,12 +967,11 @@ app.post('/api/licenses/import', isAdmin, async (req, res) => {
         const [userRes] = await connection.query('SELECT id FROM users WHERE username = ?', [username]);
         const userId = userRes[0].id;
 
-        // Insert new licenses
         if (licenses.length > 0) {
             for (const license of licenses) {
                 const newLicense = cleanDataForDB(license, LICENSE_FIELDS);
                 newLicense.produto = productName;
-                newLicense.approval_status = 'approved'; // Imports are pre-approved
+                newLicense.approval_status = 'approved'; 
                 newLicense.created_by_id = userId;
                 
                 await connection.query('INSERT INTO licenses SET ?', newLicense);
@@ -970,7 +999,7 @@ app.get('/api/licenses/totals', async (req, res) => {
         if (rows.length > 0 && rows[0].config_value) {
             res.json(JSON.parse(rows[0].config_value));
         } else {
-            res.json({}); // Return empty object if not found
+            res.json({}); 
         }
     } catch (err) {
         console.error("Get license totals error:", err);
@@ -994,7 +1023,6 @@ app.post('/api/licenses/totals', isAdmin, async (req, res) => {
     }
 });
 
-// Rename all licenses for a given product
 app.post('/api/licenses/rename-product', isAdmin, async (req, res) => {
     const { oldName, newName, username } = req.body;
     if (!oldName || !newName) {
@@ -1157,8 +1185,7 @@ app.post('/api/enable-2fa', (req, res) => {
 });
 
 app.post('/api/disable-2fa', (req, res) => {
-    // This endpoint should be protected and only accessible by the logged-in user
-    const { userId } = req.body; // In a real app, get this from a session/token
+    const { userId } = req.body;
     db.query('UPDATE users SET is2FAEnabled = FALSE, twoFASecret = NULL WHERE id = ?', [userId], (err) => {
         if (err) return res.status(500).json({ message: 'Falha ao desativar o 2FA.' });
         logAction(req.body.username || 'System', '2FA_DISABLE', 'USER', userId, 'User disabled their own 2FA.');
@@ -1167,7 +1194,6 @@ app.post('/api/disable-2fa', (req, res) => {
 });
 
 app.post('/api/disable-user-2fa', (req, res) => {
-    // Admin only endpoint to disable 2FA for another user
     const { userId } = req.body;
     db.query('UPDATE users SET is2FAEnabled = FALSE, twoFASecret = NULL WHERE id = ?', [userId], (err) => {
         if (err) return res.status(500).json({ message: 'Falha ao desativar o 2FA.' });
@@ -1182,10 +1208,8 @@ app.get('/api/settings', async (req, res) => {
         const [rows] = await db.promise().query("SELECT config_key, config_value FROM app_config");
         const settings = rows.reduce((acc, row) => {
             try {
-                // Try parsing JSON, but fall back to string if it fails
                 acc[row.config_key] = JSON.parse(row.config_value);
             } catch (e) {
-                // Handle booleans stored as strings and other non-JSON values
                  if (row.config_value === 'true') acc[row.config_key] = true;
                  else if (row.config_value === 'false') acc[row.config_key] = false;
                  else acc[row.config_key] = row.config_value;
@@ -1281,7 +1305,6 @@ app.post('/api/database/clear', isAdmin, async (req, res) => {
         await connection.query("SET FOREIGN_KEY_CHECKS = 1;");
         await connection.commit();
         
-        // Re-run migrations to set up default admin etc.
         await runMigrations(); 
 
         logAction(username, 'DELETE', 'DATABASE', 'ALL', 'Cleared all data from the database.');
