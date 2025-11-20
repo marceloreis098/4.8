@@ -298,6 +298,39 @@ const recordHistory = async (equipmentId, changedBy, changes) => {
     }
 };
 
+// --- CONSTANTS FOR DATA VALIDATION ---
+// Defines the allowed fields for Equipment and Licenses to prevent database errors
+const EQUIPMENT_FIELDS = [
+    'equipamento', 'garantia', 'patrimonio', 'serial', 'usuarioAtual', 'usuarioAnterior',
+    'local', 'setor', 'dataEntregaUsuario', 'status', 'dataDevolucao', 'tipo',
+    'notaCompra', 'notaPlKm', 'termoResponsabilidade', 'foto', 'brand', 'model',
+    'observacoes', 'emailColaborador', 'identificador', 'nomeSO', 'memoriaFisicaTotal',
+    'grupoPoliticas', 'pais', 'cidade', 'estadoProvincia', 'condicaoTermo',
+    'approval_status', 'rejection_reason', 'created_by_id'
+];
+
+const LICENSE_FIELDS = [
+    'produto', 'tipoLicenca', 'chaveSerial', 'dataExpiracao', 'usuario', 'cargo',
+    'empresa', 'setor', 'gestor', 'centroCusto', 'contaRazao', 'nomeComputador',
+    'numeroChamado', 'observacoes', 'approval_status', 'rejection_reason', 'created_by_id'
+];
+
+// --- HELPER FUNCTION TO CLEAN DATA ---
+const cleanDataForDB = (data, allowedFields) => {
+    const cleaned = {};
+    for (const field of allowedFields) {
+        if (Object.prototype.hasOwnProperty.call(data, field)) {
+            let value = data[field];
+            // Convert empty date strings to NULL to prevent DB errors
+            if ((field.startsWith('data') || field === 'lastLogin') && value === '') {
+                value = null;
+            }
+            cleaned[field] = value;
+        }
+    }
+    return cleaned;
+};
+
 
 // Middleware to check Admin role
 const isAdmin = async (req, res, next) => {
@@ -580,30 +613,35 @@ app.get('/api/equipment/:id/history', (req, res) => {
 
 app.post('/api/equipment', async (req, res) => {
     const { equipment, username } = req.body;
-    const { id, qrCode, approval_status, rejection_reason, created_by_id, ...newEquipmentData } = equipment;
 
     try {
         const [userRows] = await db.promise().query('SELECT id, role FROM users WHERE username = ?', [username]);
         if (userRows.length === 0) return res.status(404).json({ message: "User not found" });
         const user = userRows[0];
 
-        const [serialCheck] = await db.promise().query('SELECT id FROM equipment WHERE serial = ?', [newEquipmentData.serial]);
-        if (serialCheck.length > 0) {
-            return res.status(409).json({ message: "Erro: O número de série já está cadastrado no sistema." });
+        // Ensure serial uniqueness only if provided (some equipment might not have one, though rare)
+        if (equipment.serial) {
+            const [serialCheck] = await db.promise().query('SELECT id FROM equipment WHERE serial = ?', [equipment.serial]);
+            if (serialCheck.length > 0) {
+                return res.status(409).json({ message: "Erro: O número de série já está cadastrado no sistema." });
+            }
         }
 
+        // Prepare data using whitelist to prevent 'Unknown column' errors
+        const newEquipmentData = cleanDataForDB(equipment, EQUIPMENT_FIELDS);
+        
         newEquipmentData.created_by_id = user.id;
         newEquipmentData.approval_status = user.role === 'Admin' ? 'approved' : 'pending_approval';
-        
-        if (newEquipmentData.dataEntregaUsuario === '') newEquipmentData.dataEntregaUsuario = null;
-        if (newEquipmentData.dataDevolucao === '') newEquipmentData.dataDevolucao = null;
         
         const sql = "INSERT INTO equipment SET ?";
         const [result] = await db.promise().query(sql, newEquipmentData);
         
         const insertedId = result.insertId;
-        const qrCodeValue = JSON.stringify({ id: insertedId, serial: newEquipmentData.serial, type: 'equipment' });
-        await db.promise().query('UPDATE equipment SET qrCode = ? WHERE id = ?', [qrCodeValue, insertedId]);
+        // Generate QR Code (stored as string in DB)
+        if (newEquipmentData.serial) {
+            const qrCodeValue = JSON.stringify({ id: insertedId, serial: newEquipmentData.serial, type: 'equipment' });
+            await db.promise().query('UPDATE equipment SET qrCode = ? WHERE id = ?', [qrCodeValue, insertedId]);
+        }
         
         logAction(username, 'CREATE', 'EQUIPMENT', insertedId, `Created new equipment: ${newEquipmentData.equipamento}`);
         
@@ -611,7 +649,7 @@ app.post('/api/equipment', async (req, res) => {
         res.status(201).json(insertedRow[0]);
     } catch (err) {
         console.error("Add equipment error:", err);
-        res.status(500).json({ message: "Database error", error: err });
+        res.status(500).json({ message: "Database error", error: err.message });
     }
 });
 
@@ -626,27 +664,13 @@ app.put('/api/equipment/:id', async (req, res) => {
         }
         const oldEquipment = oldEquipmentRows[0];
         
-        const allowedFields = [
-            'equipamento', 'garantia', 'patrimonio', 'serial', 'usuarioAtual', 'usuarioAnterior',
-            'local', 'setor', 'dataEntregaUsuario', 'status', 'dataDevolucao', 'tipo',
-            'notaCompra', 'notaPlKm', 'termoResponsabilidade', 'foto', 'brand', 'model',
-            'observacoes', 'emailColaborador', 'identificador', 'nomeSO', 'memoriaFisicaTotal',
-            'grupoPoliticas', 'pais', 'cidade', 'estadoProvincia', 'condicaoTermo'
-        ];
+        // Prepare data using whitelist to prevent 'Unknown column' errors
+        const dataToUpdate = cleanDataForDB(equipment, EQUIPMENT_FIELDS);
 
-        const dataToUpdate = {};
-        for (const key of allowedFields) {
-            if (Object.prototype.hasOwnProperty.call(equipment, key)) {
-                dataToUpdate[key] = equipment[key];
-            }
-        }
-        
-        if (dataToUpdate.dataEntregaUsuario === '') dataToUpdate.dataEntregaUsuario = null;
-        if (dataToUpdate.dataDevolucao === '') dataToUpdate.dataDevolucao = null;
-        
         const changes = Object.keys(dataToUpdate).reduce((acc, key) => {
             const oldValue = oldEquipment[key] instanceof Date ? oldEquipment[key].toISOString().split('T')[0] : oldEquipment[key];
             const newValue = dataToUpdate[key];
+            // Loose equality for string/null matching
             if (String(oldValue || '') !== String(newValue || '')) {
                 acc.push({ field: key, oldValue, newValue });
             }
@@ -654,7 +678,7 @@ app.put('/api/equipment/:id', async (req, res) => {
         }, []);
 
         if (dataToUpdate.serial && dataToUpdate.serial !== oldEquipment.serial) {
-            dataToUpdate.qrCode = JSON.stringify({ id: equipment.id, serial: dataToUpdate.serial, type: 'equipment' });
+            dataToUpdate.qrCode = JSON.stringify({ id: id, serial: dataToUpdate.serial, type: 'equipment' });
             changes.push({field: 'qrCode', oldValue: oldEquipment.qrCode, newValue: dataToUpdate.qrCode });
         }
         
@@ -664,7 +688,7 @@ app.put('/api/equipment/:id', async (req, res) => {
 
         if (changes.length > 0) {
             await recordHistory(id, username, changes);
-            logAction(username, 'UPDATE', 'EQUIPMENT', id, `Updated equipment: ${equipment.equipamento}. Changes: ${changes.map(c => c.field).join(', ')}`);
+            logAction(username, 'UPDATE', 'EQUIPMENT', id, `Updated equipment: ${oldEquipment.equipamento}. Changes: ${changes.map(c => c.field).join(', ')}`);
         }
         
         const [updatedRow] = await db.promise().query('SELECT * FROM equipment WHERE id = ?', [id]);
@@ -704,11 +728,15 @@ app.post('/api/equipment/import', isAdmin, async (req, res) => {
         await connection.query('ALTER TABLE equipment AUTO_INCREMENT = 1');
         
         for (const equipment of equipmentList) {
-            const { id, ...newEquipment } = equipment;
+            // Clean data before insert
+            const newEquipment = cleanDataForDB(equipment, EQUIPMENT_FIELDS);
+            // Ensure ID is null to allow auto-increment
             const [result] = await connection.query('INSERT INTO equipment SET ?', [newEquipment]);
             const insertedId = result.insertId;
-            const qrCodeValue = JSON.stringify({ id: insertedId, serial: newEquipment.serial, type: 'equipment' });
-            await connection.query('UPDATE equipment SET qrCode = ? WHERE id = ?', [qrCodeValue, insertedId]);
+            if (newEquipment.serial) {
+                const qrCodeValue = JSON.stringify({ id: insertedId, serial: newEquipment.serial, type: 'equipment' });
+                await connection.query('UPDATE equipment SET qrCode = ? WHERE id = ?', [qrCodeValue, insertedId]);
+            }
         }
         
         // Set consolidation flags
@@ -741,17 +769,19 @@ app.post('/api/equipment/periodic-update', isAdmin, async (req, res) => {
             if (existingRows.length > 0) {
                 // UPDATE
                 const oldEquipment = existingRows[0];
-                const changes = Object.keys(equipment).reduce((acc, key) => {
-                    if (key !== 'id' && String(oldEquipment[key] || '') !== String(equipment[key] || '')) {
-                        acc.push({ field: key, oldValue: oldEquipment[key], newValue: equipment[key] });
+                
+                // Prepare clean update data
+                const equipmentUpdateData = cleanDataForDB(equipment, EQUIPMENT_FIELDS);
+                
+                const changes = Object.keys(equipmentUpdateData).reduce((acc, key) => {
+                    if (String(oldEquipment[key] || '') !== String(equipmentUpdateData[key] || '')) {
+                        acc.push({ field: key, oldValue: oldEquipment[key], newValue: equipmentUpdateData[key] });
                     }
                     return acc;
                 }, []);
                 
                 if (changes.length > 0) {
-                    // Remove id from the update payload to avoid errors
-                    const {id, ...updatePayload} = equipment;
-                    await connection.query('UPDATE equipment SET ? WHERE id = ?', [updatePayload, oldEquipment.id]);
+                    await connection.query('UPDATE equipment SET ? WHERE id = ?', [equipmentUpdateData, oldEquipment.id]);
                     
                     for (const change of changes) {
                         await connection.query(
@@ -763,9 +793,11 @@ app.post('/api/equipment/periodic-update', isAdmin, async (req, res) => {
                 }
             } else {
                 // INSERT
-                const { id, ...newEquipment } = equipment;
+                const newEquipment = cleanDataForDB(equipment, EQUIPMENT_FIELDS);
                 newEquipment.approval_status = 'approved'; // Updates are pre-approved
-                newEquipment.created_by_id = (await db.promise().query('SELECT id FROM users WHERE username = ?', [username]))[0][0].id;
+                const [userRes] = await connection.query('SELECT id FROM users WHERE username = ?', [username]);
+                newEquipment.created_by_id = userRes[0].id;
+
                 const [result] = await connection.query('INSERT INTO equipment SET ?', newEquipment);
                 const insertedId = result.insertId;
                 const qrCodeValue = JSON.stringify({ id: insertedId, serial: newEquipment.serial, type: 'equipment' });
@@ -810,30 +842,17 @@ app.get('/api/licenses', (req, res) => {
 
 app.post('/api/licenses', async (req, res) => {
     const { license, username } = req.body;
-    const allowedFields = [
-        'produto', 'tipoLicenca', 'chaveSerial', 'dataExpiracao', 'usuario', 'cargo',
-        'empresa', 'setor', 'gestor', 'centroCusto', 'contaRazao', 'nomeComputador',
-        'numeroChamado', 'observacoes'
-    ];
-    
-    const newLicenseData = {};
-    for (const key of allowedFields) {
-        if (Object.prototype.hasOwnProperty.call(license, key)) {
-            newLicenseData[key] = license[key];
-        }
-    }
 
     try {
         const [userRows] = await db.promise().query('SELECT id, role FROM users WHERE username = ?', [username]);
         if (userRows.length === 0) return res.status(404).json({ message: "User not found" });
         const user = userRows[0];
         
+        // Clean data using whitelist
+        const newLicenseData = cleanDataForDB(license, LICENSE_FIELDS);
+
         newLicenseData.created_by_id = user.id;
         newLicenseData.approval_status = user.role === 'Admin' ? 'approved' : 'pending_approval';
-
-        if (newLicenseData.dataExpiracao === '') {
-            newLicenseData.dataExpiracao = null;
-        }
 
         const sql = "INSERT INTO licenses SET ?";
         const [result] = await db.promise().query(sql, newLicenseData);
@@ -852,26 +871,12 @@ app.put('/api/licenses/:id', async (req, res) => {
         const { id } = req.params;
         const { license, username } = req.body;
 
-        const allowedFields = [
-            'produto', 'tipoLicenca', 'chaveSerial', 'dataExpiracao', 'usuario', 'cargo',
-            'empresa', 'setor', 'gestor', 'centroCusto', 'contaRazao', 'nomeComputador',
-            'numeroChamado', 'observacoes'
-        ];
-
-        const dataToUpdate = {};
-        for (const key of allowedFields) {
-            if (Object.prototype.hasOwnProperty.call(license, key)) {
-                dataToUpdate[key] = license[key];
-            }
-        }
+        // Clean data using whitelist to prevent 'Unknown column' errors
+        const dataToUpdate = cleanDataForDB(license, LICENSE_FIELDS);
 
         if (Object.keys(dataToUpdate).length === 0) {
             const [currentRow] = await db.promise().query('SELECT * FROM licenses WHERE id = ?', [id]);
             return res.json(currentRow.length > 0 ? currentRow[0] : {});
-        }
-
-        if (dataToUpdate.dataExpiracao === '') {
-            dataToUpdate.dataExpiracao = null;
         }
 
         await db.promise().query('UPDATE licenses SET ? WHERE id = ?', [dataToUpdate, id]);
@@ -923,15 +928,17 @@ app.post('/api/licenses/import', isAdmin, async (req, res) => {
             await connection.query('DELETE FROM licenses WHERE id IN (?)', [idsToDelete]);
         }
 
+        const [userRes] = await connection.query('SELECT id FROM users WHERE username = ?', [username]);
+        const userId = userRes[0].id;
+
         // Insert new licenses
         if (licenses.length > 0) {
             for (const license of licenses) {
-                const newLicense = {
-                    ...license,
-                    produto: productName,
-                    approval_status: 'approved', // Imports are pre-approved
-                    created_by_id: (await db.promise().query('SELECT id FROM users WHERE username = ?', [username]))[0][0].id,
-                };
+                const newLicense = cleanDataForDB(license, LICENSE_FIELDS);
+                newLicense.produto = productName;
+                newLicense.approval_status = 'approved'; // Imports are pre-approved
+                newLicense.created_by_id = userId;
+                
                 await connection.query('INSERT INTO licenses SET ?', newLicense);
             }
         }

@@ -376,10 +376,9 @@ const LicenseControl: React.FC<{ currentUser: User }> = ({ currentUser }) => {
             } else {
                 alert(`Falha ao salvar o total de licenças: ${result.message}. Tente novamente.`);
             }
-        } catch (error: unknown) {
+        } catch (error: any) {
             console.error("Failed to save license totals:", error);
-            // FIX: Ensure error is handled as 'unknown' and a string message is constructed safely.
-            const message = error instanceof Error ? error.message : String(error);
+            const message = error?.message || String(error);
             alert("Falha ao salvar o total de licenças. Tente novamente. Detalhes: " + message);
         }
     };
@@ -442,10 +441,9 @@ const LicenseControl: React.FC<{ currentUser: User }> = ({ currentUser }) => {
                 alert(`Erro ao salvar alterações: ${result.message}`);
             }
     
-        } catch (error: unknown) {
+        } catch (error: any) {
             console.error("Failed to save product name changes:", error);
-            // FIX: Ensure error is handled as 'unknown' and a string message is constructed safely before passing to alert.
-            const message = error instanceof Error ? error.message : String(error);
+            const message = error?.message || String(error);
             alert(`Erro ao salvar alterações: ${message}`);
         } finally {
             // 5. Reload all data from server to ensure consistency
